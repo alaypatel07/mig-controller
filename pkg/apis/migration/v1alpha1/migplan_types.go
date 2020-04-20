@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	migauth "github.com/konveyor/mig-controller/pkg/auth"
 	pvdr "github.com/konveyor/mig-controller/pkg/cloudprovider"
 	migref "github.com/konveyor/mig-controller/pkg/reference"
 	"github.com/konveyor/mig-controller/pkg/settings"
@@ -64,6 +65,7 @@ type MigPlanSpec struct {
 	SrcMigClusterRef  *kapi.ObjectReference `json:"srcMigClusterRef,omitempty"`
 	DestMigClusterRef *kapi.ObjectReference `json:"destMigClusterRef,omitempty"`
 	MigStorageRef     *kapi.ObjectReference `json:"migStorageRef,omitempty"`
+	IdentitySecretRef *kapi.ObjectReference `json:"identitySecretRef,omitempty"`
 	Closed            bool                  `json:"closed,omitempty"`
 	Hooks             []MigPlanHook         `json:"hooks,omitempty"`
 }
@@ -107,13 +109,105 @@ func (r *MigPlan) GetSourceCluster(client k8sclient.Client) (*MigCluster, error)
 	return GetCluster(client, r.Spec.SrcMigClusterRef)
 }
 
+// GetSourceIdentity - Get the source identity object using the secret
+// Returns nil if unable to build
+func (r *MigPlan) GetSourceIdentity(client k8sclient.Client) (*migauth.Identity, error) {
+	srcToken, err := r.GetSourceIdentityToken(client)
+	if err != nil {
+		return nil, err
+	}
+	srcCluster, err := r.GetSourceCluster(client)
+	if err != nil {
+		return nil, err
+	}
+	if srcCluster == nil || !srcCluster.Status.IsReady() {
+		return nil, errors.New("source cluster is not in a ready state")
+	}
+	srcRestCfg, err := srcCluster.BuildRestConfig(client)
+	if err != nil {
+		return nil, err
+	}
+	srcIdentity := &migauth.Identity{
+		Token:   srcToken,
+		RestCfg: *srcRestCfg,
+	}
+	return srcIdentity, nil
+}
+
+// GetDestinationIdentity - Get the destination identity object using the secret
+// Returns nil if unable to build
+func (r *MigPlan) GetDestinationIdentity(client k8sclient.Client) (*migauth.Identity, error) {
+	destToken, err := r.GetDestinationIdentityToken(client)
+	if err != nil {
+		return nil, err
+	}
+	destCluster, err := r.GetDestinationCluster(client)
+	if err != nil {
+		return nil, err
+	}
+	if destCluster == nil || !destCluster.Status.IsReady() {
+		return nil, errors.New("destination cluster is not in a ready state")
+	}
+	destRestCfg, err := destCluster.BuildRestConfig(client)
+	if err != nil {
+		return nil, err
+	}
+	destIdentity := &migauth.Identity{
+		Token:   destToken,
+		RestCfg: *destRestCfg,
+	}
+	return destIdentity, nil
+}
+
 // GetDestinationCluster - Get the referenced destination cluster.
 // Returns `nil` when the reference cannot be resolved.
 func (r *MigPlan) GetDestinationCluster(client k8sclient.Client) (*MigCluster, error) {
 	return GetCluster(client, r.Spec.DestMigClusterRef)
 }
 
-// GetStorage - Get the referenced storage..
+// GetSourceIdentity - Get the source identity token
+// Returns "" if not found
+func (r *MigPlan) GetSourceIdentityToken(client k8sclient.Client) (string, error) {
+	secret, err := r.GetIdentitySecret(client)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil {
+		return "", errors.New("identity secret not found")
+	}
+	if secret.Data == nil {
+		return "", errors.New("identity secret misconfigured")
+	}
+	if secret.Data["srcToken"] == nil {
+		return "", errors.New("identity secret misconfigured")
+	}
+	return string(secret.Data["srcToken"]), nil
+}
+
+// GetDestinationIdentity - Get the destination identity token
+// Returns "" if not found
+func (r *MigPlan) GetDestinationIdentityToken(client k8sclient.Client) (string, error) {
+	secret, err := r.GetIdentitySecret(client)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil {
+		return "", errors.New("identity secret not found")
+	}
+	if secret.Data == nil {
+		return "", errors.New("identity secret misconfigured")
+	}
+	if secret.Data["destToken"] == nil {
+		return "", errors.New("identity secret misconfigured")
+	}
+	return string(secret.Data["destToken"]), nil
+}
+
+func (r *MigPlan) GetIdentitySecret(client k8sclient.Client) (*kapi.Secret, error) {
+	return GetSecret(client, r.Spec.IdentitySecretRef)
+}
+
+// GetStorage - Get the referenced storage.
 // Returns `nil` when the reference cannot be resolved.
 func (r *MigPlan) GetStorage(client k8sclient.Client) (*MigStorage, error) {
 	return GetStorage(client, r.Spec.MigStorageRef)
@@ -155,6 +249,21 @@ func (r *MigPlan) GetRefResources(client k8sclient.Client) (*PlanResources, erro
 	}
 	if destMigCluster == nil {
 		return nil, errors.New("destination cluster not found")
+	}
+
+	// Identity
+	identitySecret, err := r.GetIdentitySecret(client)
+	if err != nil {
+		return nil, err
+	}
+	if identitySecret == nil {
+		return nil, errors.New("identity secret not found")
+	}
+	if identitySecret.Data["srcToken"] == nil {
+		return nil, errors.New("identity secret doesn't contain source token")
+	}
+	if identitySecret.Data["destToken"] == nil {
+		return nil, errors.New("identity secret doesn't contain source token")
 	}
 
 	resources := &PlanResources{
@@ -701,6 +810,7 @@ func (r *MigPlan) HasConflict(plan *MigPlan) bool {
 const (
 	PvMoveAction = "move"
 	PvCopyAction = "copy"
+	PvSkipAction = "skip"
 )
 
 // PV Copy Methods.
@@ -730,9 +840,10 @@ type PV struct {
 
 // PVC
 type PVC struct {
-	Namespace   string                            `json:"namespace,omitempty" protobuf:"bytes,3,opt,name=namespace"`
-	Name        string                            `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
-	AccessModes []kapi.PersistentVolumeAccessMode `json:"accessModes,omitempty" protobuf:"bytes,1,rep,name=accessModes,casttype=PersistentVolumeAccessMode"`
+	Namespace    string                            `json:"namespace,omitempty" protobuf:"bytes,3,opt,name=namespace"`
+	Name         string                            `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
+	AccessModes  []kapi.PersistentVolumeAccessMode `json:"accessModes,omitempty" protobuf:"bytes,1,rep,name=accessModes,casttype=PersistentVolumeAccessMode"`
+	HasReference bool                              `json:"hasReference,omitempty"`
 }
 
 // Supported
@@ -744,7 +855,7 @@ type Supported struct {
 }
 
 // Selection
-// Action - The PV migration action (move|copy)
+// Action - The PV migration action (move|copy|skip)
 // StorageClass - The PV storage class name to use in the destination cluster.
 // AccessMode   - The PV access mode to use in the destination cluster, if different from src PVC AccessMode
 // CopyMethod   - The PV copy method to use ('filesystem' for restic copy, or 'snapshot' for velero snapshot plugin)
