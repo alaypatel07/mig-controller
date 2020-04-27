@@ -6,9 +6,13 @@ import (
 	"github.com/go-logr/logr"
 	migapi "github.com/konveyor/mig-controller/pkg/apis/migration/v1alpha1"
 	"github.com/konveyor/mig-controller/pkg/compat"
+	"github.com/konveyor/mig-controller/pkg/settings"
 	"github.com/pkg/errors"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// Application settings.
+var Settings = &settings.Settings
 
 // Requeue
 var FastReQ = time.Duration(time.Millisecond * 100)
@@ -17,52 +21,56 @@ var NoReQ = time.Duration(0)
 
 // Phases
 const (
-	Created                       = ""
-	Started                       = "Started"
-	Prepare                       = "Prepare"
-	EnsureCloudSecretPropagated   = "EnsureCloudSecretPropagated"
-	PreBackupHooks                = "PreBackupHooks"
-	PostBackupHooks               = "PostBackupHooks"
-	PreRestoreHooks               = "PreRestoreHooks"
-	PostRestoreHooks              = "PostRestoreHooks"
-	PreBackupHooksFailed          = "PreBackupHooksFailed"
-	PostBackupHooksFailed         = "PostBackupHooksFailed"
-	PreRestoreHooksFailed         = "PreRestoreHooksFailed"
-	PostRestoreHooksFailed        = "PostRestoreHooksFailed"
-	EnsureInitialBackup           = "EnsureInitialBackup"
-	InitialBackupCreated          = "InitialBackupCreated"
-	InitialBackupFailed           = "InitialBackupFailed"
-	AnnotateResources             = "AnnotateResources"
-	EnsureStagePods               = "EnsureStagePods"
-	StagePodsCreated              = "StagePodsCreated"
-	RestartRestic                 = "RestartRestic"
-	ResticRestarted               = "ResticRestarted"
-	QuiesceApplications           = "QuiesceApplications"
-	EnsureQuiesced                = "EnsureQuiesced"
-	UnQuiesceApplications         = "UnQuiesceApplications"
-	EnsureStageBackup             = "EnsureStageBackup"
-	StageBackupCreated            = "StageBackupCreated"
-	StageBackupFailed             = "StageBackupFailed"
-	EnsureInitialBackupReplicated = "EnsureInitialBackupReplicated"
-	EnsureStageBackupReplicated   = "EnsureStageBackupReplicated"
-	EnsureStageRestore            = "EnsureStageRestore"
-	StageRestoreCreated           = "StageRestoreCreated"
-	StageRestoreFailed            = "StageRestoreFailed"
-	EnsureFinalRestore            = "EnsureFinalRestore"
-	FinalRestoreCreated           = "FinalRestoreCreated"
-	FinalRestoreFailed            = "FinalRestoreFailed"
-	Verification                  = "Verification"
-	EnsureStagePodsDeleted        = "EnsureStagePodsDeleted"
-	EnsureStagePodsTerminated     = "EnsureStagePodsTerminated"
-	EnsureAnnotationsDeleted      = "EnsureAnnotationsDeleted"
-	EnsureLabelsDeleted           = "EnsureLabelsDeleted"
-	EnsureMigratedDeleted         = "EnsureMigratedDeleted"
-	DeleteMigrated                = "DeleteMigrated"
-	DeleteBackups                 = "DeleteBackups"
-	DeleteRestores                = "DeleteRestores"
-	Canceling                     = "Canceling"
-	Canceled                      = "Canceled"
-	Completed                     = "Completed"
+	Created                         = ""
+	Started                         = "Started"
+	Prepare                         = "Prepare"
+	EnsureCloudSecretPropagated     = "EnsureCloudSecretPropagated"
+	PreBackupHooks                  = "PreBackupHooks"
+	PostBackupHooks                 = "PostBackupHooks"
+	PreRestoreHooks                 = "PreRestoreHooks"
+	PostRestoreHooks                = "PostRestoreHooks"
+	PreBackupHooksFailed            = "PreBackupHooksFailed"
+	PostBackupHooksFailed           = "PostBackupHooksFailed"
+	PreRestoreHooksFailed           = "PreRestoreHooksFailed"
+	PostRestoreHooksFailed          = "PostRestoreHooksFailed"
+	EnsureInitialBackup             = "EnsureInitialBackup"
+	InitialBackupCreated            = "InitialBackupCreated"
+	InitialBackupFailed             = "InitialBackupFailed"
+	AnnotateResources               = "AnnotateResources"
+	EnsureStagePodsFromRunning      = "EnsureStagePodsFromRunning"
+	EnsureStagePodsFromTemplates    = "EnsureStagePodsFromTemplates"
+	EnsureStagePodsFromOrphanedPVCs = "EnsureStagePodsFromOrphanedPVCs"
+	StagePodsCreated                = "StagePodsCreated"
+	RestartRestic                   = "RestartRestic"
+	ResticRestarted                 = "ResticRestarted"
+	QuiesceApplications             = "QuiesceApplications"
+	EnsureQuiesced                  = "EnsureQuiesced"
+	UnQuiesceApplications           = "UnQuiesceApplications"
+	EnsureStageBackup               = "EnsureStageBackup"
+	StageBackupCreated              = "StageBackupCreated"
+	StageBackupFailed               = "StageBackupFailed"
+	EnsureInitialBackupReplicated   = "EnsureInitialBackupReplicated"
+	EnsureStageBackupReplicated     = "EnsureStageBackupReplicated"
+	EnsureNamespacesCreated         = "EnsureNamespacesCreated"
+	EnsureStageRestore              = "EnsureStageRestore"
+	StageRestoreCreated             = "StageRestoreCreated"
+	StageRestoreFailed              = "StageRestoreFailed"
+	EnsureFinalRestore              = "EnsureFinalRestore"
+	FinalRestoreCreated             = "FinalRestoreCreated"
+	FinalRestoreFailed              = "FinalRestoreFailed"
+	Verification                    = "Verification"
+	EnsureStagePodsDeleted          = "EnsureStagePodsDeleted"
+	EnsureStagePodsTerminated       = "EnsureStagePodsTerminated"
+	EnsureAnnotationsDeleted        = "EnsureAnnotationsDeleted"
+	EnsureLabelsDeleted             = "EnsureLabelsDeleted"
+	EnsureMigratedDeleted           = "EnsureMigratedDeleted"
+	DeleteMigrated                  = "DeleteMigrated"
+	DeleteBackups                   = "DeleteBackups"
+	DeleteRestores                  = "DeleteRestores"
+	MigrationFailed                 = "MigrationFailed"
+	Canceling                       = "Canceling"
+	Cancelled                       = "Cancelled"
+	Completed                       = "Completed"
 )
 
 // Flags
@@ -85,13 +93,16 @@ var StageItinerary = Itinerary{
 		{phase: Started},
 		{phase: Prepare},
 		{phase: EnsureCloudSecretPropagated},
-		{phase: AnnotateResources, all: HasPVs},
-		{phase: EnsureStagePods, all: HasPVs},
+		{phase: EnsureStagePodsFromRunning, all: HasPVs},
+		{phase: EnsureStagePodsFromTemplates, all: HasPVs},
+		{phase: EnsureStagePodsFromOrphanedPVCs, all: HasPVs},
 		{phase: StagePodsCreated, all: HasStagePods},
+		{phase: AnnotateResources, all: HasPVs},
 		{phase: RestartRestic, all: HasStagePods},
 		{phase: ResticRestarted, all: HasStagePods},
 		{phase: QuiesceApplications, all: Quiesce},
 		{phase: EnsureQuiesced, all: Quiesce},
+		{phase: EnsureNamespacesCreated},
 		{phase: EnsureStageBackup, all: HasPVs},
 		{phase: StageBackupCreated, all: HasPVs},
 		{phase: EnsureStageBackupReplicated, all: HasPVs},
@@ -115,13 +126,16 @@ var FinalItinerary = Itinerary{
 		{phase: PreBackupHooks},
 		{phase: EnsureInitialBackup},
 		{phase: InitialBackupCreated},
-		{phase: AnnotateResources, all: HasPVs},
-		{phase: EnsureStagePods, all: HasPVs},
+		{phase: EnsureStagePodsFromRunning, all: HasPVs},
+		{phase: EnsureStagePodsFromTemplates, all: HasPVs},
+		{phase: EnsureStagePodsFromOrphanedPVCs, all: HasPVs},
 		{phase: StagePodsCreated, all: HasStagePods},
+		{phase: AnnotateResources, all: HasPVs},
 		{phase: RestartRestic, all: HasStagePods},
 		{phase: ResticRestarted, all: HasStagePods},
 		{phase: QuiesceApplications, all: Quiesce},
 		{phase: EnsureQuiesced, all: Quiesce},
+		{phase: EnsureNamespacesCreated},
 		{phase: EnsureStageBackup, all: HasPVs},
 		{phase: StageBackupCreated, all: HasPVs},
 		{phase: EnsureStageBackupReplicated, all: HasPVs},
@@ -153,7 +167,8 @@ var CancelItinerary = Itinerary{
 		{phase: DeleteMigrated},
 		{phase: EnsureMigratedDeleted},
 		{phase: UnQuiesceApplications, all: Quiesce},
-		{phase: Canceled},
+		// TODO: @alpatel figure out if we should delete the namespace if we create it
+		{phase: Cancelled},
 		{phase: Completed},
 	},
 }
@@ -161,6 +176,7 @@ var CancelItinerary = Itinerary{
 var FailedItinerary = Itinerary{
 	Name: "Failed",
 	Steps: []Step{
+		{phase: MigrationFailed},
 		{phase: EnsureStagePodsDeleted, all: HasStagePods},
 		{phase: EnsureAnnotationsDeleted, all: HasPVs},
 		{phase: DeleteMigrated},
@@ -312,12 +328,29 @@ func (t *Task) Run() error {
 			return err
 		}
 		t.next()
-	case EnsureStagePods:
-		_, err := t.ensureStagePodsCreated()
+	case EnsureStagePodsFromRunning:
+		err := t.ensureStagePodsFromRunning()
 		if err != nil {
 			log.Trace(err)
 			return err
 		}
+		t.Requeue = NoReQ
+		t.next()
+	case EnsureStagePodsFromTemplates:
+		err := t.ensureStagePodsFromTemplates()
+		if err != nil {
+			log.Trace(err)
+			return err
+		}
+		t.Requeue = NoReQ
+		t.next()
+	case EnsureStagePodsFromOrphanedPVCs:
+		err := t.ensureStagePodsFromOrphanedPVCs()
+		if err != nil {
+			log.Trace(err)
+			return err
+		}
+		t.Requeue = NoReQ
 		t.next()
 	case StagePodsCreated:
 		started, err := t.ensureStagePodsStarted()
@@ -527,6 +560,13 @@ func (t *Task) Run() error {
 		} else {
 			t.Requeue = NoReQ
 		}
+	case EnsureNamespacesCreated:
+		err := t.ensureNamespacesCreated()
+		if err != nil {
+			log.Trace(err)
+			return err
+		}
+		t.next()
 	case EnsureFinalRestore:
 		backup, err := t.getInitialBackup()
 		if err != nil {
@@ -595,6 +635,14 @@ func (t *Task) Run() error {
 			Durable:  true,
 		})
 		t.next()
+
+	case MigrationFailed:
+		if Settings.Migration.FailureRollback {
+			t.next()
+		} else {
+			t.Phase = Completed
+		}
+
 	case DeleteMigrated:
 		err := t.deleteMigrated()
 		if err != nil {
@@ -625,10 +673,10 @@ func (t *Task) Run() error {
 			return err
 		}
 		t.next()
-	case Canceled:
+	case Cancelled:
 		t.Owner.Status.DeleteCondition(Canceling)
 		t.Owner.Status.SetCondition(migapi.Condition{
-			Type:     Canceled,
+			Type:     Cancelled,
 			Status:   True,
 			Reason:   Cancel,
 			Category: Advisory,
@@ -744,7 +792,6 @@ func (t *Task) anyFlags(step Step) bool {
 // Phase fail.
 func (t *Task) fail(nextPhase string, reasons []string) {
 	t.addErrors(reasons)
-	t.Phase = nextPhase
 	t.Owner.AddErrors(t.Errors)
 	t.Owner.Status.SetCondition(migapi.Condition{
 		Type:     Failed,
@@ -754,6 +801,7 @@ func (t *Task) fail(nextPhase string, reasons []string) {
 		Message:  FailedMessage,
 		Durable:  true,
 	})
+	t.Phase = nextPhase
 }
 
 // Add errors.
@@ -770,7 +818,7 @@ func (t *Task) UID() string {
 
 // Get whether the migration has failed
 func (t *Task) failed() bool {
-	return t.Owner.HasErrors()
+	return t.Owner.HasErrors() || t.Owner.Status.HasCondition(Failed)
 }
 
 // Get whether the migration is cancelled.
@@ -818,14 +866,40 @@ func (t *Task) getDestinationClient() (compat.Client, error) {
 	return t.PlanResources.DestMigCluster.GetClient(t.Client)
 }
 
-// Get the persistent volumes included in the plan.
+// Get the persistent volumes included in the plan which are not skipped.
 func (t *Task) getPVs() migapi.PersistentVolumes {
-	return t.PlanResources.MigPlan.Spec.PersistentVolumes
+	volumes := []migapi.PV{}
+	for _, pv := range t.PlanResources.MigPlan.Spec.PersistentVolumes.List {
+		if pv.Selection.Action != migapi.PvSkipAction {
+			volumes = append(volumes, pv)
+		}
+	}
+	pvList := t.PlanResources.MigPlan.Spec.PersistentVolumes.DeepCopy()
+	pvList.List = volumes
+	return *pvList
 }
 
-// Get whether the associated plan lists any PVs.
+// Get the persistentVolumeClaims / action mapping included in the plan which are not skipped.
+func (t *Task) getPVCs() map[k8sclient.ObjectKey]migapi.PV {
+	claims := map[k8sclient.ObjectKey]migapi.PV{}
+	for _, pv := range t.getPVs().List {
+		claimKey := k8sclient.ObjectKey{
+			Name:      pv.PVC.Name,
+			Namespace: pv.PVC.Namespace,
+		}
+		claims[claimKey] = pv
+	}
+	return claims
+}
+
+// Get whether the associated plan lists not skipped PVs.
 func (t *Task) hasPVs() bool {
-	return len(t.getPVs().List) > 0
+	for _, pv := range t.PlanResources.MigPlan.Spec.PersistentVolumes.List {
+		if pv.Selection.Action != migapi.PvSkipAction {
+			return true
+		}
+	}
+	return false
 }
 
 // Get whether the verification is desired
