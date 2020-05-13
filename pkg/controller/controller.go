@@ -23,6 +23,7 @@ import (
 	"github.com/konveyor/mig-controller/pkg/controller/migmigration"
 	"github.com/konveyor/mig-controller/pkg/controller/migplan"
 	"github.com/konveyor/mig-controller/pkg/controller/migstorage"
+	"github.com/konveyor/mig-controller/pkg/controller/migtoken"
 	"github.com/konveyor/mig-controller/pkg/settings"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -32,20 +33,14 @@ import (
 // them self to the manager.
 type AddFunction func(manager.Manager) error
 
-//
-// List of controller add functions for the CAM role.
-var CamControllers = []AddFunction{
-	migcluster.Add,
-	migmigration.Add,
-	mighook.Add,
-	migstorage.Add,
-	migplan.Add,
-}
-
-//
-// List of controller add functions for the Discovery role.
-var DiscoveryControllers = []AddFunction{
-	discovery.Add,
+var Controllers = map[string]AddFunction{
+	settings.ClusterRole:   migcluster.Add,
+	settings.DiscoveryRole: discovery.Add,
+	settings.MigrationRole: migmigration.Add,
+	settings.PlanRole:      migplan.Add,
+	settings.StorageRole:   migstorage.Add,
+	settings.TokenRole:     migtoken.Add,
+	// TODO: probably need to add mighook
 }
 
 //
@@ -55,27 +50,13 @@ func AddToManager(m manager.Manager) error {
 	if err != nil {
 		return err
 	}
-	load := func(functions []AddFunction) error {
-		for _, f := range functions {
-			if err := f(m); err != nil {
+
+	for controllerRole, addFunc := range Controllers {
+		if settings.Settings.Role.Enabled(controllerRole) {
+			if err := addFunc(m); err != nil {
 				return err
 			}
 		}
-		return nil
-	}
-	if settings.Settings.HasRole(settings.CamRole) {
-		err := load(CamControllers)
-		if err != nil {
-			return err
-		}
-
-	}
-	if settings.Settings.HasRole(settings.DiscoveryRole) {
-		err := load(DiscoveryControllers)
-		if err != nil {
-			return err
-		}
-
 	}
 
 	return nil
