@@ -18,8 +18,14 @@ package migplan
 
 import (
 	"context"
+	"fmt"
+	"github.com/konveyor/mig-controller/pkg/compat"
 	"github.com/konveyor/mig-controller/pkg/settings"
+	projectv1 "github.com/openshift/api/project/v1"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"strconv"
 
 	migapi "github.com/konveyor/mig-controller/pkg/apis/migration/v1alpha1"
@@ -218,6 +224,18 @@ func (r *ReconcileMigPlan) Reconcile(request reconcile.Request) (reconcile.Resul
 		return reconcile.Result{Requeue: true}, nil
 	}
 
+	err = r.deployVelero(plan)
+	if err != nil {
+		log.Trace(err)
+		return reconcile.Result{Requeue: true}, nil
+	}
+
+	err = r.waitForMigControllerReady(plan)
+	if err != nil {
+		log.Trace(err)
+		return reconcile.Result{Requeue: true}, nil
+	}
+
 	// PV discovery
 	err = r.updatePvs(plan)
 	if err != nil {
@@ -361,4 +379,155 @@ func (r *ReconcileMigPlan) planSuspended(plan *migapi.MigPlan) error {
 	}
 
 	return nil
+}
+
+func (r ReconcileMigPlan) deployVelero(plan *migapi.MigPlan) error {
+	clients, err := r.getBothClients(plan)
+	if err != nil {
+		return err
+	}
+	resources := r.getDeployVeleroResources(plan)
+
+	for _, client := range clients {
+		for _, r := range resources {
+			u := r.DeepCopy()
+			err = client.Create(context.Background(), u)
+			switch {
+			case errors.IsAlreadyExists(err):
+			case err != nil:
+				return err
+			}
+			log.Info("created resource",
+				u.GroupVersionKind().String(),
+				u.GetNamespace()+"/"+u.GetName(),
+			)
+		}
+	}
+
+	return nil
+}
+
+func (r ReconcileMigPlan) getDeployVeleroResources(plan *migapi.MigPlan) []*unstructured.Unstructured {
+	projectRequestUnstructured := &unstructured.Unstructured{}
+	projectRequestUnstructured.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   projectv1.GroupName,
+		Version: projectv1.GroupVersion.Version,
+		Kind:    "ProjectRequest",
+	})
+	projectRequestUnstructured.SetName(plan.Name)
+	projectRequestUnstructured.SetLabels(map[string]string{"migration.openshift.io/migplan": plan.GetName()})
+	migrationController := &unstructured.Unstructured{}
+	migrationController.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "migration.openshift.io",
+		Version: "v1alpha1",
+		Kind:    "MigrationController",
+	})
+	migrationController.SetLabels(map[string]string{"migration.openshift.io/migplan": plan.GetName()})
+	migrationController.SetName("migration-controller")
+	migrationController.SetNamespace(plan.Name)
+	err := unstructured.SetNestedMap(migrationController.Object, map[string]interface{}{
+		"azure_resource_group": "",
+		"cluster_name":         "host",
+		"migration_velero":     "true",
+		"migration_controller": "false",
+		"migration_ui":         "false",
+		"restic_timeout":       "1h",
+	}, "spec")
+	if err != nil {
+		// TODO: handle this error better
+		panic(err)
+	}
+	return []*unstructured.Unstructured{projectRequestUnstructured, migrationController}
+}
+
+func (r ReconcileMigPlan) waitForMigControllerReady(plan *migapi.MigPlan) error {
+	migrationController := &unstructured.Unstructured{}
+	migrationController.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "migration.openshift.io",
+		Version: "v1alpha1",
+		Kind:    "MigrationController",
+	})
+	migrationController.SetLabels(map[string]string{"migration.openshift.io/migplan": plan.GetName()})
+	migrationController.SetName("migration-controller")
+	migrationController.SetNamespace(plan.Name)
+
+	clients, err := r.getBothClients(plan)
+	if err != nil {
+		return err
+	}
+	for _, c := range clients {
+		u := &unstructured.Unstructured{}
+		err := c.Get(context.Background(), types.NamespacedName{
+			Namespace: migrationController.GetName(),
+			Name:      migrationController.GetNamespace(),
+		}, u)
+		if err != nil {
+			return nil
+		}
+		status, found, err := unstructured.NestedString(u.Object, "status", "phase")
+		switch {
+		case err != nil:
+			return err
+		case !found:
+			return fmt.Errorf("waiting for status in plan's migration controller")
+		case status != "Reconciled":
+			return fmt.Errorf("waiting for status.phase == Reconciled in plan's migration controller")
+		}
+	}
+	return nil
+}
+
+func (r ReconcileMigPlan) getBothClients(plan *migapi.MigPlan) ([]compat.Client, error) {
+	sourceRef := plan.Spec.SrcMigClusterRef
+
+	// NotSet
+	if !migref.RefSet(sourceRef) {
+		plan.Status.SetCondition(migapi.Condition{
+			Type:     InvalidSourceClusterRef,
+			Status:   True,
+			Reason:   NotSet,
+			Category: Critical,
+			Message:  InvalidSourceClusterRefMessage,
+		})
+		return nil, nil
+	}
+
+	sourceCluster, err := migapi.GetCluster(r, sourceRef)
+	if err != nil {
+		log.Trace(err)
+		return nil, err
+	}
+
+	sourceClient, err := sourceCluster.GetClient(r.Client)
+	if err != nil {
+		log.Trace(err)
+		return nil, err
+	}
+
+	destRef := plan.Spec.DestMigClusterRef
+
+	// NotSet
+	if !migref.RefSet(destRef) {
+		plan.Status.SetCondition(migapi.Condition{
+			Type:     InvalidDestinationClusterRef,
+			Status:   True,
+			Reason:   NotSet,
+			Category: Critical,
+			Message:  InvalidSourceClusterRefMessage,
+		})
+		return nil, nil
+	}
+
+	destinationCluster, err := migapi.GetCluster(r, destRef)
+	if err != nil {
+		log.Trace(err)
+		return nil, err
+	}
+
+	destinationClient, err := destinationCluster.GetClient(r.Client)
+	if err != nil {
+		log.Trace(err)
+		return nil, err
+	}
+	return []compat.Client{sourceClient, destinationClient}, nil
 }
