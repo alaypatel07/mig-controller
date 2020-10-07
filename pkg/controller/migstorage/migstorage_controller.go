@@ -18,6 +18,7 @@ package migstorage
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/konveyor/controller/pkg/logging"
@@ -107,26 +108,33 @@ func (r *ReconcileMigStorage) Reconcile(request reconcile.Request) (reconcile.Re
 	err = r.Get(context.TODO(), request.NamespacedName, storage)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			log.V(2).Info("unable to get migstorage, not found", "migstorage", request.String(), "error", err.Error())
 			return reconcile.Result{}, nil
 		}
-		log.Trace(err)
+		log.Trace(fmt.Errorf("unable to get migstorage: %#v", err), "migstorage", request.String())
 		return reconcile.Result{Requeue: true}, nil
 	}
 
 	// Report reconcile error.
 	defer func() {
-		if err == nil || errors.IsConflict(err) {
+		switch {
+		case err == nil:
+			log.V(4).Info("migstorage reconcile successful", "migstorage", request.String())
+			return
+		case errors.IsConflict(err):
+			log.Error(fmt.Errorf("unable to get migstorage: %#v", err), "migstorage", request.String())
 			return
 		}
 		storage.Status.SetReconcileFailed(err)
 		err := r.Update(context.TODO(), storage)
 		if err != nil {
-			log.Trace(err)
+			log.Trace(fmt.Errorf("unable to update migstorage status: %#v", err), "migstorage", request.String())
 			return
 		}
 	}()
 
 	// Begin staging conditions.
+	// TODO: reach out to Jeff/Derek on what would be good logging info here
 	storage.Status.BeginStagingConditions()
 
 	// Validations.
@@ -139,7 +147,7 @@ func (r *ReconcileMigStorage) Reconcile(request reconcile.Request) (reconcile.Re
 	// Ready
 	storage.Status.SetReady(
 		!storage.Status.HasBlockerCondition(),
-		ReadyMessage)
+		"The storage is ready.")
 
 	// End staging conditions.
 	storage.Status.EndStagingConditions()

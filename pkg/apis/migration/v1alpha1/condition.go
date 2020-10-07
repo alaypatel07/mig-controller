@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/konveyor/controller/pkg/logging"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -199,6 +200,33 @@ func (r *Conditions) SetCondition(condition Condition) {
 		condition.LastTransitionTime = metav1.NewTime(time.Now())
 		r.List = append(r.List, condition)
 	} else {
+		found.Update(condition)
+	}
+}
+
+// Set (add/update) the specified condition to the collection.
+func (r *Conditions) SetAndLogCondition(logger logging.Logger, condition Condition, namespace, name string) {
+	if r.List == nil {
+		r.List = []Condition{}
+	}
+	condition.staged = true
+	found := r.find(condition.Type)
+	if found == nil {
+		logger.Info(fmt.Sprintf("condition added on %s/%s", namespace, name),
+			"category", condition.Category,
+			"type", condition.Type,
+			"reason", condition.Reason,
+			"message", condition.Message,
+			"errors", condition.Items)
+		condition.LastTransitionTime = metav1.NewTime(time.Now())
+		r.List = append(r.List, condition)
+	} else {
+		logger.Info(fmt.Sprintf("condition updated on %s/%s", namespace, name),
+			"category", condition.Category,
+			"type", condition.Type,
+			"reason", condition.Reason,
+			"message", condition.Message,
+			"errors", condition.Items)
 		found.Update(condition)
 	}
 }
