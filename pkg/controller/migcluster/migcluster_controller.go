@@ -18,6 +18,7 @@ package migcluster
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	liberr "github.com/konveyor/controller/pkg/error"
@@ -118,26 +119,33 @@ func (r *ReconcileMigCluster) Reconcile(request reconcile.Request) (reconcile.Re
 	err = r.Get(context.TODO(), request.NamespacedName, cluster)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			log.V(2).Info("unable to get migcluster, not found", "migcluster", request.String(), "error", err.Error())
 			return reconcile.Result{}, nil
 		}
-		log.Trace(err)
+		log.Trace(fmt.Errorf("unable to get migcluster: %#v", err), "migcluster", request.String())
 		return reconcile.Result{Requeue: true}, nil
 	}
 
 	// Report reconcile error.
 	defer func() {
-		if err == nil || errors.IsConflict(err) {
+		switch {
+		case err == nil:
+			log.V(4).Info("migcluster reconcile successful", "migcluster", request.String())
+			return
+		case errors.IsConflict(err):
+			log.Error(fmt.Errorf("unable to get migcluster: %#v", err), "migcluster", request.String())
 			return
 		}
 		cluster.Status.SetReconcileFailed(err)
 		err := r.Update(context.TODO(), cluster)
 		if err != nil {
-			log.Trace(err)
+			log.Trace(fmt.Errorf("unable to update migcluster status: %#v", err), "migcluster", request.String())
 			return
 		}
 	}()
 
 	// Begin staging conditions.
+	// TODO: Logging info needs discussion
 	cluster.Status.BeginStagingConditions()
 
 	// Validations.
