@@ -123,7 +123,7 @@ func (r *ReconcileMigCluster) Reconcile(request reconcile.Request) (reconcile.Re
 			return reconcile.Result{}, nil
 		}
 		log.Trace(fmt.Errorf("unable to get migcluster: %#v", err), "migcluster", request.String())
-		return reconcile.Result{Requeue: true}, nil
+		return reconcile.Result{Requeue: true}, err
 	}
 
 	// Report reconcile error.
