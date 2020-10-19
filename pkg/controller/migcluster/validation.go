@@ -87,38 +87,41 @@ func (r ReconcileMigCluster) validate(cluster *migapi.MigCluster) error {
 func (r ReconcileMigCluster) validateURL(cluster *migapi.MigCluster) error {
 	// Not needed.
 	if cluster.Spec.IsHostCluster {
+		log.V(4).Info("skipping url validation for host cluster",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 
 	if cluster.Spec.URL == "" {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidURL,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  MissingURLMessage,
-		})
+			Message:  "`url` is missing for the non-host cluster",
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 	u, err := url.Parse(cluster.Spec.URL)
 	if err != nil {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidURL,
 			Status:   True,
 			Reason:   Malformed,
 			Category: Critical,
-			Message:  MalformedURLMessage,
-		})
+			Message:  "`url` is malformed for the non-host cluster",
+			Items: []string{err.Error()},
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidURL,
 			Status:   True,
 			Reason:   InvalidScheme,
 			Category: Critical,
-			Message:  InvalidURLSchemeMessage,
-		})
+			Message:  "`url` scheme is invalid, must be 'http' or 'https'",
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 	return nil
@@ -129,58 +132,69 @@ func (r ReconcileMigCluster) validateSaSecret(cluster *migapi.MigCluster) error 
 
 	// Not needed.
 	if cluster.Spec.IsHostCluster {
+		log.V(4).Info("skipping sa secret validation for  host cluster",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 
 	// NotSet
 	if !migref.RefSet(ref) {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSaSecretRef,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  InvalidSaSecretRefMessage,
-		})
+			Message:  "cluster.Spec.serviceAccountSecretRef name or namespace is empty",
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 
 	secret, err := migapi.GetSecret(r, ref)
 	if err != nil {
-		return liberr.Wrap(err)
+		return liberr.Wrap(fmt.Errorf("error getting sa secret %s/%s for migcluster: %#v",
+			cluster.Spec.ServiceAccountSecretRef.Namespace,
+			cluster.Spec.ServiceAccountSecretRef.Name,
+			err))
 	}
 
 	// NotFound
 	if secret == nil {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSaSecretRef,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  InvalidSaSecretRefMessage,
-		})
+			Message: fmt.Sprintf("couldn't find sa secret %s/%s for migcluster",
+				cluster.Spec.ServiceAccountSecretRef.Namespace,
+				cluster.Spec.ServiceAccountSecretRef.Name),
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 
 	// saToken
 	token, found := secret.Data[migapi.SaToken]
 	if !found {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSaToken,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  InvalidSaTokenMessage,
-		})
+			Message: fmt.Sprintf("couldn't find 'saToken' key in secret %s/%s for migcluster",
+				cluster.Spec.ServiceAccountSecretRef.Namespace,
+				cluster.Spec.ServiceAccountSecretRef.Name),
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 	if len(token) == 0 {
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSaToken,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  InvalidSaTokenMessage,
-		})
+			Message: fmt.Sprintf("empty 'saToken' found in secret %s/%s for migcluster",
+				cluster.Spec.ServiceAccountSecretRef.Namespace,
+				cluster.Spec.ServiceAccountSecretRef.Name),
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 
@@ -190,24 +204,29 @@ func (r ReconcileMigCluster) validateSaSecret(cluster *migapi.MigCluster) error 
 // Test the connection.
 func (r ReconcileMigCluster) testConnection(cluster *migapi.MigCluster) error {
 	if cluster.Spec.IsHostCluster {
+		log.V(4).Info("skipping connection testing for host cluster",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 	if cluster.Status.HasCriticalCondition() {
+		log.V(4).Info("skipping connection testing, cluster is in critical state",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 
 	// Timeout of 5s instead of the default 30s to lessen lockup
 	timeout := time.Duration(time.Second * 5)
 	err := cluster.TestConnection(r.Client, timeout)
+	log.V(4).Info("performing test connection for migcluster",
+		"name", cluster.Name, "namespace", cluster.Namespace)
 	if err != nil {
-		message := fmt.Sprintf(TestConnectFailedMessage, err)
-		cluster.Status.SetCondition(migapi.Condition{
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     TestConnectFailed,
 			Status:   True,
 			Reason:   ConnectFailed,
 			Category: Critical,
-			Message:  message,
-		})
+			Message:  fmt.Sprintf("test connection for migcluster failed: %s", err),
+		}, cluster.Namespace, cluster.Name)
 		return nil
 	}
 
@@ -216,9 +235,13 @@ func (r ReconcileMigCluster) testConnection(cluster *migapi.MigCluster) error {
 
 func (r *ReconcileMigCluster) validateSaTokenPrivileges(cluster *migapi.MigCluster) error {
 	if cluster.Spec.IsHostCluster {
+		log.V(4).Info("skipping sa token privilege validation for host cluster",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 	if cluster.Status.HasCriticalCondition() {
+		log.V(4).Info("skipping sa token privilege validation, cluster is in critical state",
+			"name", cluster.Name, "namespace", cluster.Namespace)
 		return nil
 	}
 
@@ -259,14 +282,25 @@ func (r *ReconcileMigCluster) validateSaTokenPrivileges(cluster *migapi.MigClust
 	if err != nil {
 		return liberr.Wrap(err)
 	}
-	if !migrationSar.Status.Allowed || !veleroSar.Status.Allowed {
-		cluster.Status.SetCondition(migapi.Condition{
+
+	switch {
+	case !migrationSar.Status.Allowed:
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     SaTokenNotPrivileged,
 			Status:   True,
 			Reason:   Unauthorized,
 			Category: Critical,
-			Message:  SaTokenNotPrivilegedMessage,
-		})
+			Message:  "migration.openshift.io sa token has insufficient privileges",
+		}, cluster.Namespace, cluster.Name)
+
+	case !veleroSar.Status.Allowed:
+		cluster.Status.SetAndLogCondition(log, migapi.Condition{
+			Type:     SaTokenNotPrivileged,
+			Status:   True,
+			Reason:   Unauthorized,
+			Category: Critical,
+			Message:  "velero.io sa token has insufficient privileges",
+		}, cluster.Namespace, cluster.Name)
 	}
 	return nil
 }

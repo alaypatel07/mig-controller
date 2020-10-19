@@ -224,13 +224,13 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 
 	// NotSet
 	if !migref.RefSet(ref) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidStorageRef,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  InvalidStorageRefMessage,
-		})
+			Message:  "plan.Spec.migStorageRef name or namespace is empty",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -241,24 +241,28 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 
 	// NotFound
 	if storage == nil {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidStorageRef,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  InvalidStorageRefMessage,
-		})
+			Message:  fmt.Sprintf("couldn't find migstorage %s/%s configured for migplan",
+				plan.Spec.MigStorageRef.Namespace,
+				plan.Spec.MigStorageRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
 	// NotReady
 	if !storage.Status.IsReady() {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     StorageNotReady,
 			Status:   True,
 			Category: Critical,
-			Message:  StorageNotReadyMessage,
-		})
+			Message:  fmt.Sprintf("migstorage %s/%s configured for the migplan is not `Ready`",
+				plan.Spec.MigStorageRef.Namespace,
+				plan.Spec.MigStorageRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -269,24 +273,24 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 func (r ReconcileMigPlan) validateNamespaces(plan *migapi.MigPlan) error {
 	count := len(plan.Spec.Namespaces)
 	if count == 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NsListEmpty,
 			Status:   True,
 			Category: Critical,
-			Message:  NsListEmptyMessage,
-		})
+			// TODO check earlier message
+			Message:  "The ns list configured for the migplan is empty",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 	limit := Settings.Plan.NsLimit
 	if count > limit {
-		message := fmt.Sprintf(NsLimitExceededMessage, limit, count)
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NsLimitExceeded,
 			Status:   True,
 			Reason:   LimitExceeded,
 			Category: Critical,
-			Message:  message,
-		})
+			Message:  fmt.Sprintf("Namespace limit for migplan: %d exceeded, found:%d.", limit, count),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -296,6 +300,14 @@ func (r ReconcileMigPlan) validateNamespaces(plan *migapi.MigPlan) error {
 // Validate the total number of running pods (limit) across namespaces.
 func (r ReconcileMigPlan) validatePodLimit(plan *migapi.MigPlan) error {
 	if plan.Status.HasAnyCondition(Suspended, NsLimitExceeded) {
+		switch {
+		case plan.Status.HasCondition(Suspended):
+			log.V(4).Info("skipping validating pod limit, migplan is suspended", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(NsLimitExceeded):
+			log.V(4).Info("skipping validating pod limit, ns limit exceeded for migplan", "name",
+				plan.Name, "namespace", plan.Namespace)
+		}
 		plan.Status.StageCondition(PodLimitExceeded)
 		return nil
 	}
@@ -304,6 +316,14 @@ func (r ReconcileMigPlan) validatePodLimit(plan *migapi.MigPlan) error {
 		return liberr.Wrap(err)
 	}
 	if cluster == nil || !cluster.Status.IsReady() {
+		switch {
+		case cluster == nil:
+			log.V(4).Info("skipping validating pod limit, src cluster not configured for migplan", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case !cluster.Status.IsReady():
+			log.V(4).Info("skipping validating pod limit, src cluster is not `Ready` for migplan", "name",
+				plan.Name, "namespace", plan.Namespace)
+		}
 		return nil
 	}
 	client, err := cluster.GetClient(r)
@@ -328,14 +348,13 @@ func (r ReconcileMigPlan) validatePodLimit(plan *migapi.MigPlan) error {
 		count += len(list.Items)
 	}
 	if count > limit {
-		message := fmt.Sprintf(PodLimitExceededMessage, limit, count)
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PodLimitExceeded,
 			Status:   True,
 			Reason:   LimitExceeded,
 			Category: Warn,
-			Message:  message,
-		})
+			Message:  fmt.Sprintf("Pod limit: %d exceeded, found: %d.", limit, count),
+		}, plan.Namespace, plan.Name)
 	}
 
 	return nil
@@ -347,13 +366,13 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 
 	// NotSet
 	if !migref.RefSet(ref) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSourceClusterRef,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  InvalidSourceClusterRefMessage,
-		})
+			Message:  "plan.Spec.srcMigClusterRef name or namespace is empty",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -364,55 +383,63 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 
 	// NotFound
 	if cluster == nil {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidSourceClusterRef,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  InvalidSourceClusterRefMessage,
-		})
+			Message: fmt.Sprintf("couldn't find src migcluster %s/%s for migplan",
+				plan.Spec.SrcMigClusterRef.Namespace,
+				plan.Spec.SrcMigClusterRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
 	// NotReady
 	if !cluster.Status.IsReady() {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     SourceClusterNotReady,
 			Status:   True,
 			Category: Critical,
-			Message:  SourceClusterNotReadyMessage,
-		})
+			Message: fmt.Sprintf("The src cluster %s/%s configured for the migplan is not `Ready`",
+				plan.Spec.SrcMigClusterRef.Namespace,
+				plan.Spec.SrcMigClusterRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
 	return nil
 }
 
-// Validate the referenced source cluster.
+// Validate the referenced destination cluster.
 func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error {
 	ref := plan.Spec.DestMigClusterRef
 
 	// NotSet
 	if !migref.RefSet(ref) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidDestinationClusterRef,
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  InvalidDestinationClusterRefMessage,
-		})
+			Message:  "plan.Spec.dstMigClusterRef name or namespace is empty",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
 	// NotDistinct
 	if reflect.DeepEqual(ref, plan.Spec.SrcMigClusterRef) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidDestinationCluster,
 			Status:   True,
 			Reason:   NotDistinct,
 			Category: Critical,
-			Message:  InvalidDestinationClusterMessage,
-		})
+			Message: fmt.Sprintf("The `srcMigClusterRef` %s/%s and `dstMigClusterRef` %s/%s cannot be the same for the migplan",
+				plan.Spec.SrcMigClusterRef.Namespace,
+				plan.Spec.SrcMigClusterRef.Name,
+				plan.Spec.DestMigClusterRef.Namespace,
+				plan.Spec.DestMigClusterRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -423,24 +450,28 @@ func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error
 
 	// NotFound
 	if cluster == nil {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     InvalidDestinationClusterRef,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  InvalidDestinationClusterRefMessage,
-		})
+			Message: fmt.Sprintf("couldn't find destination migcluster %s/%s for migplan",
+				plan.Spec.DestMigClusterRef.Namespace,
+				plan.Spec.DestMigClusterRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
 	// NotReady
 	if !cluster.Status.IsReady() {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     DestinationClusterNotReady,
 			Status:   True,
 			Category: Critical,
-			Message:  DestinationClusterNotReadyMessage,
-		})
+			Message: fmt.Sprintf("The destination cluster %s/%s configured for the migplan is not `Ready`",
+				plan.Spec.DestMigClusterRef.Namespace,
+				plan.Spec.DestMigClusterRef.Name),
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -466,6 +497,14 @@ func (r ReconcileMigPlan) validateRequiredNamespaces(plan *migapi.MigPlan) error
 func (r ReconcileMigPlan) validateSourceNamespaces(plan *migapi.MigPlan) error {
 	namespaces := []string{migapi.VeleroNamespace}
 	if plan.Status.HasAnyCondition(Suspended, NsLimitExceeded) {
+		switch {
+		case plan.Status.HasCondition(Suspended):
+			log.V(4).Info("skipping validating source namespaces, migplan is suspended", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(NsLimitExceeded):
+			log.V(4).Info("skipping validating source namespaces, ns limit exceeded for migplan", "name",
+				plan.Name, "namespace", plan.Namespace)
+		}
 		plan.Status.StageCondition(NsNotFoundOnSourceCluster)
 		return nil
 	}
@@ -500,14 +539,14 @@ func (r ReconcileMigPlan) validateSourceNamespaces(plan *migapi.MigPlan) error {
 		}
 	}
 	if len(notFound) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NsNotFoundOnSourceCluster,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  NsNotFoundOnSourceClusterMessage,
+			Message:  fmt.Sprintf("Namespaces: %#v configured in migplan not found on the src cluster", notFound),
 			Items:    notFound,
-		})
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -519,6 +558,8 @@ func (r ReconcileMigPlan) validateSourceNamespaces(plan *migapi.MigPlan) error {
 func (r ReconcileMigPlan) validateDestinationNamespaces(plan *migapi.MigPlan) error {
 	namespaces := []string{migapi.VeleroNamespace}
 	if plan.Status.HasAnyCondition(Suspended) {
+		log.V(4).Info("skipping validating destination namespaces, migplan is suspended",
+			"name", plan.Name, "namespace", plan.Namespace)
 		return nil
 	}
 	cluster, err := plan.GetDestinationCluster(r)
@@ -547,14 +588,14 @@ func (r ReconcileMigPlan) validateDestinationNamespaces(plan *migapi.MigPlan) er
 		}
 	}
 	if len(notFound) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NsNotFoundOnDestinationCluster,
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  NsNotFoundOnDestinationClusterMessage,
+			Message:  fmt.Sprintf("Namespaces: %#v configured in migplan not found on the destination cluster", notFound),
 			Items:    notFound,
-		})
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -577,14 +618,14 @@ func (r ReconcileMigPlan) validateConflict(plan *migapi.MigPlan) error {
 		}
 	}
 	if len(list) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PlanConflict,
 			Status:   True,
 			Reason:   Conflict,
 			Category: Error,
-			Message:  PlanConflictMessage,
+			Message:  fmt.Sprintf("The migplan is in conflict with %#v", list),
 			Items:    list,
-		})
+		}, plan.Namespace, plan.Name)
 	}
 
 	return nil
@@ -605,6 +646,8 @@ func (r ReconcileMigPlan) validatePvSelections(plan *migapi.MigPlan) error {
 	warnCopyMethodSnapshot := make([]string, 0)
 
 	if plan.Status.HasAnyCondition(Suspended) {
+		log.V(4).Info("skipping validating PV selections, migplan is suspended",
+			"name", plan.Name, "namespace", plan.Namespace)
 		return nil
 	}
 	destMigCluster, err := plan.GetDestinationCluster(r.Client)
@@ -680,88 +723,98 @@ func (r ReconcileMigPlan) validatePvSelections(plan *migapi.MigPlan) error {
 		}
 
 	}
-	if len(invalidAction) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+
+	switch {
+	case len(invalidAction) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvInvalidAction,
 			Status:   True,
 			Reason:   NotDone,
 			Category: Error,
-			Message:  PvInvalidActionMessage,
-			Items:    invalidAction,
-		})
-	}
-	if len(unsupported) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has an unsupported `action`.",
+				invalidAction),
+			Items: invalidAction,
+		}, plan.Namespace, plan.Name)
+
+	case len(unsupported) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvNoSupportedAction,
 			Status:   True,
 			Category: Warn,
-			Message:  PvNoSupportedActionMessage,
+			Message:  fmt.Sprintf("PV in `persistentVolumes` %#v with no `SupportedActions`.", unsupported),
 			Items:    unsupported,
-		})
-	}
-	if len(invalidStorageClass) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		}, plan.Namespace, plan.Name)
+
+	case len(invalidStorageClass) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvInvalidStorageClass,
 			Status:   True,
 			Reason:   NotDone,
 			Category: Error,
-			Message:  PvInvalidStorageClassMessage,
-			Items:    invalidStorageClass,
-		})
-	}
-	if len(invalidAccessMode) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has an unsupported `storageClass`.",
+				invalidStorageClass),
+			Items: invalidStorageClass,
+		}, plan.Namespace, plan.Name)
+
+	case len(invalidAccessMode) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvInvalidAccessMode,
 			Status:   True,
 			Category: Error,
-			Message:  PvInvalidAccessModeMessage,
-			Items:    invalidAccessMode,
-		})
-	}
-	if len(missingStorageClass) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has an invalid `accessMode`.",
+				invalidAccessMode),
+			Items: invalidAccessMode,
+		}, plan.Namespace, plan.Name)
+
+	case len(missingStorageClass) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvNoStorageClassSelection,
 			Status:   True,
 			Category: Warn,
-			Message:  PvNoStorageClassSelectionMessage,
-			Items:    missingStorageClass,
-		})
-	}
-	if len(unavailableAccessMode) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has no `Selected.StorageClass`. Make sure that the necessary static persistent volumes exist in the destination cluster.",
+				missingStorageClass),
+			Items: missingStorageClass,
+		}, plan.Namespace, plan.Name)
+
+	case len(unavailableAccessMode) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvWarnAccessModeUnavailable,
 			Status:   True,
 			Category: Warn,
-			Message:  PvWarnAccessModeUnavailableMessage,
-			Items:    unavailableAccessMode,
-		})
-	}
-	if len(missingCopyMethod) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("AccessMode for PVC in `persistentVolumes` %#v unavailable in chosen storage class",
+				unavailableAccessMode),
+			Items: unavailableAccessMode,
+		}, plan.Namespace, plan.Name)
+
+	case len(missingCopyMethod) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvNoCopyMethodSelection,
 			Status:   True,
 			Category: Error,
-			Message:  PvNoCopyMethodSelectionMessage,
-			Items:    missingCopyMethod,
-		})
-	}
-	if len(invalidCopyMethod) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has no `Selected.CopyMethod`.",
+				missingCopyMethod),
+			Items: missingCopyMethod,
+		}, plan.Namespace, plan.Name)
+
+	case len(invalidCopyMethod) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvInvalidCopyMethod,
 			Status:   True,
 			Category: Error,
-			Message:  PvInvalidCopyMethodMessage,
-			Items:    invalidCopyMethod,
-		})
-	}
-	if len(warnCopyMethodSnapshot) > 0 {
-		plan.Status.SetCondition(migapi.Condition{
+			Message: fmt.Sprintf("PV in `persistentVolumes` %#v has an invalid `copyMethod`.",
+				invalidCopyMethod),
+			Items: invalidCopyMethod,
+		}, plan.Namespace, plan.Name)
+
+	case len(warnCopyMethodSnapshot) > 0:
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     PvWarnCopyMethodSnapshot,
 			Status:   True,
 			Category: Warn,
-			Message:  PvWarnCopyMethodSnapshotMessage,
-			Items:    warnCopyMethodSnapshot,
-		})
+			Message: fmt.Sprintf("CopyMethod for PV in `persistentVolumes` %#v is set to `snapshot`. Make sure that the chosen storage class is compatible with the source volume's storage type for Snapshot support.",
+				warnCopyMethodSnapshot),
+			Items: warnCopyMethodSnapshot,
+		}, plan.Namespace, plan.Name)
 	}
 
 	return nil
@@ -795,6 +848,17 @@ func (r *ReconcileMigPlan) validateRegistryProxySecret(secret *kapi.Secret) bool
 // Validate source proxy secret
 func (r ReconcileMigPlan) validateSourceRegistryProxySecret(plan *migapi.MigPlan) error {
 	if plan.Status.HasAnyCondition(Suspended, InvalidSourceClusterRef, SourceClusterNotReady) {
+		switch {
+		case plan.Status.HasCondition(Suspended):
+			log.V(4).Info("skipping validating src registry proxy secret, migplan is suspended", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(InvalidSourceClusterRef):
+			log.V(4).Info("skipping validating src registry proxy secret, src cluster ref is invalid", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(SourceClusterNotReady):
+			log.V(4).Info("skipping validating src registry proxy secret, src cluster is not ready", "name",
+				plan.Name, "namespace", plan.Namespace)
+		}
 		return nil
 	}
 
@@ -830,26 +894,28 @@ func (r ReconcileMigPlan) validateSourceRegistryProxySecret(plan *migapi.MigPlan
 	}
 	if len(list.Items) == 0 {
 		// No proxy secret is valid configuration
+		log.V(4).Info("No valid configuration found for migplan's src cluster registry proxy secret",
+			"name", plan.Name, "Namespace", plan.Namespace)
 		return nil
 	}
 	if len(list.Items) > 1 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     SourceClusterProxySecretMisconfigured,
 			Status:   True,
 			Reason:   Conflict,
 			Category: Critical,
-			Message:  SourceClusterProxySecretMisconfiguredMessage,
-		})
+			Message:  "More than one src cluster registry proxy secret configuration found",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 	if !r.validateRegistryProxySecret(&list.Items[0]) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     SourceClusterProxySecretMisconfigured,
 			Status:   True,
 			Reason:   KeyNotFound,
 			Category: Critical,
-			Message:  SourceClusterProxySecretMisconfiguredMessage,
-		})
+			Message:  "src cluster registry proxy secret is misconfigured, secret has invalid keys",
+		}, plan.Namespace, plan.Name)
 	}
 	return nil
 }
@@ -857,6 +923,17 @@ func (r ReconcileMigPlan) validateSourceRegistryProxySecret(plan *migapi.MigPlan
 // Validate destination proxy secret
 func (r ReconcileMigPlan) validateDestinationRegistryProxySecret(plan *migapi.MigPlan) error {
 	if plan.Status.HasAnyCondition(Suspended, InvalidDestinationClusterRef, DestinationClusterNotReady) {
+		switch {
+		case plan.Status.HasCondition(Suspended):
+			log.V(4).Info("skipping validating destination registry proxy secret, migplan is suspended", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(InvalidDestinationClusterRef):
+			log.V(4).Info("skipping validating destination registry proxy secret, destination cluster ref is invalid", "name",
+				plan.Name, "namespace", plan.Namespace)
+		case plan.Status.HasCondition(DestinationClusterNotReady):
+			log.V(4).Info("skipping validating destination registry proxy secret, destination cluster is not ready", "name",
+				plan.Name, "namespace", plan.Namespace)
+		}
 		return nil
 	}
 
@@ -895,30 +972,32 @@ func (r ReconcileMigPlan) validateDestinationRegistryProxySecret(plan *migapi.Mi
 		return nil
 	}
 	if len(list.Items) > 1 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     DestinationClusterProxySecretMisconfigured,
 			Status:   True,
 			Reason:   Conflict,
 			Category: Critical,
-			Message:  DestinationClusterProxySecretMisconfiguredMessage,
-		})
+			Message:  "More than one destination cluster registry proxy secret configuration found",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 	if !r.validateRegistryProxySecret(&list.Items[0]) {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     DestinationClusterProxySecretMisconfigured,
 			Status:   True,
 			Reason:   KeyNotFound,
 			Category: Critical,
-			Message:  DestinationClusterProxySecretMisconfiguredMessage,
-		})
+			Message:  "destination cluster registry proxy secret is misconfigured, secret has invalid keys",
+		}, plan.Namespace, plan.Name)
 	}
 	return nil
 }
 
-// Validate the pods, all should be healthy befor migration
+// Validate the pods, all should be healthy before migration
 func (r ReconcileMigPlan) validatePods(plan *migapi.MigPlan) error {
 	if plan.Status.HasAnyCondition(Suspended) {
+		log.V(4).Info("skipping validation pods before migration, migplan is suspended",
+			"name", plan.Name, "namespace", plan.Namespace)
 		plan.Status.StageCondition(SourcePodsNotHealthy)
 		return nil
 	}
@@ -949,9 +1028,9 @@ func (r ReconcileMigPlan) validatePods(plan *migapi.MigPlan) error {
 		workload := migapi.Workload{
 			Name: "Pods",
 		}
-		for _, unstrucredPod := range *unhealthyPods {
+		for _, unstructured := range *unhealthyPods {
 			pod := &kapi.Pod{}
-			err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstrucredPod.UnstructuredContent(), pod)
+			err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructured.UnstructuredContent(), pod)
 			if err != nil {
 				return liberr.Wrap(err)
 			}
@@ -970,13 +1049,13 @@ func (r ReconcileMigPlan) validatePods(plan *migapi.MigPlan) error {
 	plan.Status.UnhealthyResources = unhealthyResources
 
 	if len(plan.Status.UnhealthyResources.Namespaces) != 0 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     SourcePodsNotHealthy,
 			Status:   True,
 			Reason:   NotHealthy,
 			Category: Warn,
-			Message:  SourcePodsNotHealthyMessage,
-		})
+			Message:  "Source namespace(s) contain unhealthy pods. See: `unhealthyNamespaces` for details.",
+		}, plan.Namespace, plan.Name)
 	}
 
 	return nil
@@ -997,13 +1076,13 @@ func (r ReconcileMigPlan) validateHooks(plan *migapi.MigPlan) error {
 
 		// NotFound
 		if k8serror.IsNotFound(err) {
-			plan.Status.SetCondition(migapi.Condition{
+			plan.Status.SetAndLogCondition(log, migapi.Condition{
 				Type:     InvalidHookRef,
 				Status:   True,
 				Reason:   NotFound,
 				Category: Critical,
-				Message:  InvalidHookRefMessage,
-			})
+				Message:  "One or more referenced hooks do not exist.",
+			}, plan.Namespace, plan.Name)
 			return nil
 		} else if err != nil {
 			return liberr.Wrap(err)
@@ -1011,34 +1090,34 @@ func (r ReconcileMigPlan) validateHooks(plan *migapi.MigPlan) error {
 
 		// InvalidHookSA
 		if errs := validation.IsDNS1123Subdomain(hook.ServiceAccount); len(errs) != 0 {
-			plan.Status.SetCondition(migapi.Condition{
+			plan.Status.SetAndLogCondition(log, migapi.Condition{
 				Type:     InvalidHookSAName,
 				Status:   True,
 				Reason:   NotSet,
 				Category: Critical,
-				Message:  InvalidHookSANameMessage,
-			})
+				Message:  "The serviceAccount specified is invalid, DNS-1123 subdomain regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*'",
+			}, plan.Namespace, plan.Name)
 		}
 
 		// InvalidHookNS
 		if errs := validation.IsDNS1123Label(hook.ExecutionNamespace); len(errs) != 0 {
-			plan.Status.SetCondition(migapi.Condition{
+			plan.Status.SetAndLogCondition(log, migapi.Condition{
 				Type:     InvalidHookNSName,
 				Status:   True,
 				Reason:   NotSet,
 				Category: Critical,
-				Message:  InvalidHookNSNameMessage,
-			})
+				Message:  "The executionNamespace specified is invalid, DNS-1123 label regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?'.",
+			}, plan.Namespace, plan.Name)
 		}
 
 		// NotReady
 		if !migHook.Status.IsReady() {
-			plan.Status.SetCondition(migapi.Condition{
+			plan.Status.SetAndLogCondition(log, migapi.Condition{
 				Type:     HookNotReady,
 				Status:   True,
 				Category: Critical,
-				Message:  HookNotReadyMessage,
-			})
+				Message:  "One or more referenced hooks are not ready.",
+			}, plan.Namespace, plan.Name)
 			return nil
 		}
 
@@ -1052,12 +1131,12 @@ func (r ReconcileMigPlan) validateHooks(plan *migapi.MigPlan) error {
 		case migapi.PostBackupHookPhase:
 			postBackupCount++
 		default:
-			plan.Status.SetCondition(migapi.Condition{
+			plan.Status.SetAndLogCondition(log, migapi.Condition{
 				Type:     HookPhaseUnknown,
 				Status:   True,
 				Category: Critical,
-				Message:  HookPhaseUnknown,
-			})
+				Message:  "hook phase is unknown",
+			}, plan.Namespace, plan.Name)
 			return nil
 		}
 	}
@@ -1066,12 +1145,12 @@ func (r ReconcileMigPlan) validateHooks(plan *migapi.MigPlan) error {
 		postRestoreCount > 1 ||
 		preBackupCount > 1 ||
 		postBackupCount > 1 {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     HookPhaseDuplicateMessage,
 			Status:   True,
 			Category: Critical,
-			Message:  HookPhaseDuplicateMessage,
-		})
+			Message:  "Only one hook may be specified per phase, duplicate hooks found for one more phases",
+		}, plan.Namespace, plan.Name)
 		return nil
 	}
 
@@ -1113,9 +1192,13 @@ type NfsValidation struct {
 // will be updated to not support the `move` action.
 func (r *NfsValidation) Run(client k8sclient.Client) error {
 	if !r.Plan.Status.HasAnyCondition(PvsDiscovered) {
+		log.V(4).Info("skipping validating nfs servers, PV discovery done", "name", r.Plan.Name,
+			"namespace", r.Plan.Namespace)
 		return nil
 	}
 	if r.Plan.Status.HasAnyCondition(Suspended) {
+		log.V(4).Info("skipping validating nfs servers, migplan is suspended", "name", r.Plan.Name,
+			"namespace", r.Plan.Namespace)
 		r.Plan.Status.StageCondition(NfsNotAccessible)
 		return nil
 	}
@@ -1210,13 +1293,13 @@ func (r *NfsValidation) validate() error {
 		}
 	}
 	if len(notAccessible) > 0 {
-		r.Plan.Status.SetCondition(migapi.Condition{
+		r.Plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NfsNotAccessible,
 			Status:   True,
 			Category: Warn,
-			Message:  NfsNotAccessibleMessage,
+			Message:  fmt.Sprintf("NFS servers %#v not accessible on the destination cluster.", notAccessible),
 			Items:    notAccessible,
-		})
+		}, r.Plan.Namespace, r.Plan.Name)
 	}
 
 	return nil
@@ -1247,13 +1330,13 @@ func (r *NfsValidation) findPod() error {
 		}
 	}
 	if r.pod == nil {
-		r.Plan.Status.SetCondition(migapi.Condition{
+		r.Plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     NfsAccessCannotBeValidated,
 			Status:   True,
 			Category: Error,
 			Reason:   NotFound,
-			Message:  NfsAccessCannotBeValidatedMessage,
-		})
+			Message:  "NFS access cannot be validated on the destination cluster, could not find suitable pod for cmd execution",
+		}, r.Plan.Namespace, r.Plan.Name)
 		return nil
 	}
 

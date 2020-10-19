@@ -18,6 +18,7 @@ package migplan
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	liberr "github.com/konveyor/controller/pkg/error"
@@ -166,21 +167,27 @@ func (r *ReconcileMigPlan) Reconcile(request reconcile.Request) (reconcile.Resul
 	err = r.Get(context.TODO(), request.NamespacedName, plan)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			log.V(2).Info("unable to get migplan, not found", "migplan", request.String(), "error", err.Error())
 			return reconcile.Result{}, nil
 		}
-		log.Trace(err)
+		log.Trace(fmt.Errorf("unable to get migplan: %#v", err), "migplan", request.String())
 		return reconcile.Result{}, err
 	}
 
 	// Report reconcile error.
 	defer func() {
-		if err == nil || errors.IsConflict(err) {
+		switch {
+		case err == nil:
+			log.V(4).Info("migplan reconcile successful", "migplan", request.String())
+			return
+		case errors.IsConflict(err):
+			log.Error(fmt.Errorf("unable to get migplan: %#v", err), "migplan", request.String())
 			return
 		}
 		plan.Status.SetReconcileFailed(err)
 		err := r.Update(context.TODO(), plan)
 		if err != nil {
-			log.Trace(err)
+			log.V(0).Info(fmt.Sprintf("unable to update migplan status: %#v", err), "migplan", request.String())
 			return
 		}
 	}()
@@ -196,6 +203,7 @@ func (r *ReconcileMigPlan) Reconcile(request reconcile.Request) (reconcile.Resul
 	}
 
 	// Begin staging conditions.
+	// TODO: logging info needs discussion
 	plan.Status.BeginStagingConditions()
 
 	// Plan Suspended
@@ -311,12 +319,12 @@ func (r *ReconcileMigPlan) ensureClosed(plan *migapi.MigPlan) error {
 		}
 	}
 	plan.Status.DeleteCondition(StorageEnsured, RegistriesEnsured, Suspended)
-	plan.Status.SetCondition(migapi.Condition{
+	plan.Status.SetAndLogCondition(log, migapi.Condition{
 		Type:     Closed,
 		Status:   True,
 		Category: Advisory,
-		Message:  ClosedMessage,
-	})
+		Message:  "The migration plan is in closed state",
+	}, plan.Namespace, plan.Name)
 	// Apply changes.
 	plan.MarkReconciled()
 	err = r.Update(context.TODO(), plan)
@@ -349,12 +357,12 @@ func (r *ReconcileMigPlan) planSuspended(plan *migapi.MigPlan) error {
 	}
 
 	if suspended {
-		plan.Status.SetCondition(migapi.Condition{
+		plan.Status.SetAndLogCondition(log, migapi.Condition{
 			Type:     Suspended,
 			Status:   True,
 			Category: Advisory,
-			Message:  SuspendedMessage,
-		})
+			Message:  "The migration plan is in suspended state",
+		}, plan.Namespace, plan.Name)
 	}
 
 	return nil
