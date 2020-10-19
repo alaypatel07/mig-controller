@@ -187,7 +187,7 @@ func (r *ReconcileMigPlan) Reconcile(request reconcile.Request) (reconcile.Resul
 		plan.Status.SetReconcileFailed(err)
 		err := r.Update(context.TODO(), plan)
 		if err != nil {
-			log.Trace(fmt.Errorf("unable to update migplan status: %#v", err), "migplan", request.String())
+			log.V(0).Info(fmt.Sprintf("unable to update migplan status: %#v", err), "migplan", request.String())
 			return
 		}
 	}()

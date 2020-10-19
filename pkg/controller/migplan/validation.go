@@ -229,7 +229,7 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  "migStorageRef not set as a migstorage for the migplan",
+			Message:  "plan.Spec.migStorageRef name or namespace is empty",
 		}, plan.Namespace, plan.Name)
 		return nil
 	}
@@ -246,7 +246,7 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message:  fmt.Sprintf("couldn't find migstorage configured for migplan %s/%s",
+			Message:  fmt.Sprintf("couldn't find migstorage %s/%s configured for migplan",
 				plan.Spec.MigStorageRef.Namespace,
 				plan.Spec.MigStorageRef.Name),
 		}, plan.Namespace, plan.Name)
@@ -259,7 +259,7 @@ func (r ReconcileMigPlan) validateStorage(plan *migapi.MigPlan) error {
 			Type:     StorageNotReady,
 			Status:   True,
 			Category: Critical,
-			Message:  fmt.Sprintf("The storage referenced by the migplan is not `Ready` %s/%s",
+			Message:  fmt.Sprintf("migstorage %s/%s configured for the migplan is not `Ready`",
 				plan.Spec.MigStorageRef.Namespace,
 				plan.Spec.MigStorageRef.Name),
 		}, plan.Namespace, plan.Name)
@@ -371,7 +371,7 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  "srcMigClusterRef not set as a migcluster for the migplan",
+			Message:  "plan.Spec.srcMigClusterRef name or namespace is empty",
 		}, plan.Namespace, plan.Name)
 		return nil
 	}
@@ -388,7 +388,7 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message: fmt.Sprintf("couldn't find src migcluster for migplan %s/%s",
+			Message: fmt.Sprintf("couldn't find src migcluster %s/%s for migplan",
 				plan.Spec.SrcMigClusterRef.Namespace,
 				plan.Spec.SrcMigClusterRef.Name),
 		}, plan.Namespace, plan.Name)
@@ -401,7 +401,7 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 			Type:     SourceClusterNotReady,
 			Status:   True,
 			Category: Critical,
-			Message: fmt.Sprintf("The src cluster referenced by the migplan is not `Ready` %s/%s",
+			Message: fmt.Sprintf("The src cluster %s/%s configured for the migplan is not `Ready`",
 				plan.Spec.SrcMigClusterRef.Namespace,
 				plan.Spec.SrcMigClusterRef.Name),
 		}, plan.Namespace, plan.Name)
@@ -411,7 +411,7 @@ func (r ReconcileMigPlan) validateSourceCluster(plan *migapi.MigPlan) error {
 	return nil
 }
 
-// Validate the referenced source cluster.
+// Validate the referenced destination cluster.
 func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error {
 	ref := plan.Spec.DestMigClusterRef
 
@@ -422,7 +422,7 @@ func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error
 			Status:   True,
 			Reason:   NotSet,
 			Category: Critical,
-			Message:  "dstMigClusterRef not set as a migcluster for the migplan",
+			Message:  "plan.Spec.dstMigClusterRef name or namespace is empty",
 		}, plan.Namespace, plan.Name)
 		return nil
 	}
@@ -455,7 +455,7 @@ func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error
 			Status:   True,
 			Reason:   NotFound,
 			Category: Critical,
-			Message: fmt.Sprintf("couldn't find destination migcluster for migplan %s/%s",
+			Message: fmt.Sprintf("couldn't find destination migcluster %s/%s for migplan",
 				plan.Spec.DestMigClusterRef.Namespace,
 				plan.Spec.DestMigClusterRef.Name),
 		}, plan.Namespace, plan.Name)
@@ -468,7 +468,7 @@ func (r ReconcileMigPlan) validateDestinationCluster(plan *migapi.MigPlan) error
 			Type:     DestinationClusterNotReady,
 			Status:   True,
 			Category: Critical,
-			Message: fmt.Sprintf("The destination cluster referenced by the migplan is not `Ready` %s/%s",
+			Message: fmt.Sprintf("The destination cluster %s/%s configured for the migplan is not `Ready`",
 				plan.Spec.DestMigClusterRef.Namespace,
 				plan.Spec.DestMigClusterRef.Name),
 		}, plan.Namespace, plan.Name)

@@ -139,7 +139,7 @@ func (r *ReconcileMigCluster) Reconcile(request reconcile.Request) (reconcile.Re
 		cluster.Status.SetReconcileFailed(err)
 		err := r.Update(context.TODO(), cluster)
 		if err != nil {
-			log.Trace(fmt.Errorf("unable to update migcluster status: %#v", err), "migcluster", request.String())
+			log.V(0).Info(fmt.Sprintf("unable to update migcluster status: %#v", err), "migcluster", request.String())
 			return
 		}
 	}()
