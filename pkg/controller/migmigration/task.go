@@ -654,8 +654,6 @@ func (t *Task) Run() error {
 		PhaseDescriptions[t.Phase] = dvm.Status.PhaseDescription
 		t.setProgress(progress)
 		if completed {
-			step := t.Owner.Status.FindStep(t.Step)
-			step.MarkCompleted()
 			if len(reasons) > 0 {
 				t.setDirectVolumeMigrationFailureWarning(dvm)
 			}
@@ -1051,9 +1049,6 @@ func (t *Task) updatePipeline() {
 	if currentStep != nil {
 		currentStep.MarkStarted()
 		currentStep.Phase = t.Phase
-		if currentStep.Name == StepDirectVolume {
-			return
-		}
 		if desc, found := PhaseDescriptions[t.Phase]; found {
 			currentStep.Message = desc
 		} else {
