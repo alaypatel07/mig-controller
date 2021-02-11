@@ -413,7 +413,7 @@ func (t *Task) createStunnelClientPods() error {
 				},
 			},
 		}
-		trueBool := true
+		//trueBool := true
 		runAsUser := int64(0)
 		containers := []corev1.Container{}
 
@@ -440,9 +440,9 @@ func (t *Task) createStunnelClientPods() error {
 				},
 			},
 			SecurityContext: &corev1.SecurityContext{
-				Privileged:             &isRsyncPrivileged,
-				RunAsUser:              &runAsUser,
-				ReadOnlyRootFilesystem: &trueBool,
+				Privileged: &isRsyncPrivileged,
+				RunAsUser:  &runAsUser,
+				//ReadOnlyRootFilesystem: &trueBool,
 			},
 			Resources: corev1.ResourceRequirements{
 				Limits:   limits,

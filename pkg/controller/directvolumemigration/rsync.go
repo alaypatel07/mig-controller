@@ -510,7 +510,7 @@ func (t *Task) createRsyncTransferPods() error {
 			},
 		}
 		trueBool := true
-		runAsUser := int64(0)
+		//runAsUser := int64(0)
 
 		// Add PVC volume mounts
 		for _, vol := range vols {
@@ -571,8 +571,8 @@ func (t *Task) createRsyncTransferPods() error {
 						},
 						VolumeMounts: volumeMounts,
 						SecurityContext: &corev1.SecurityContext{
-							Privileged:             &isRsyncPrivileged,
-							RunAsUser:              &runAsUser,
+							Privileged: &isRsyncPrivileged,
+							//RunAsUser:              &runAsUser,
 							ReadOnlyRootFilesystem: &trueBool,
 						},
 						Resources: corev1.ResourceRequirements{
@@ -603,8 +603,8 @@ func (t *Task) createRsyncTransferPods() error {
 							},
 						},
 						SecurityContext: &corev1.SecurityContext{
-							Privileged:             &isRsyncPrivileged,
-							RunAsUser:              &runAsUser,
+							Privileged: &isRsyncPrivileged,
+							//RunAsUser:              &runAsUser,
 							ReadOnlyRootFilesystem: &trueBool,
 						},
 					},
@@ -1016,7 +1016,7 @@ func (t *Task) createRsyncClientPods() error {
 		ip := svc.Spec.ClusterIP
 
 		trueBool := true
-		runAsUser := int64(0)
+		//runAsUser := int64(0)
 
 		// Add PVC volume mounts
 		for _, vol := range vols {
@@ -1063,8 +1063,8 @@ func (t *Task) createRsyncClientPods() error {
 				},
 				VolumeMounts: volumeMounts,
 				SecurityContext: &corev1.SecurityContext{
-					Privileged:             &isPrivileged,
-					RunAsUser:              &runAsUser,
+					Privileged: &isPrivileged,
+					//RunAsUser:              &runAsUser,
 					ReadOnlyRootFilesystem: &trueBool,
 				},
 				Resources: corev1.ResourceRequirements{
