@@ -60,6 +60,11 @@ const (
 	InvalidPod        = "InvalidPod"
 )
 
+const (
+	// CreatingContainer initial container state
+	ContainerCreating = "ContainerCreating"
+)
+
 // Add creates a new DirectVolumeMigrationProgress Controller and adds it to the Manager with default RBAC. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
@@ -276,6 +281,12 @@ func (r *ReconcileDirectVolumeMigrationProgress) reportContainerStatus(pvProgres
 		exitCode := containerStatus.LastTerminationState.Terminated.ExitCode
 		pvProgress.Status.ExitCode = &exitCode
 		pvProgress.Status.ContainerElapsedTime = &metav1.Duration{Duration: containerStatus.LastTerminationState.Terminated.FinishedAt.Sub(containerStatus.LastTerminationState.Terminated.StartedAt.Time).Round(time.Second)}
+	case !containerStatus.Ready && containerStatus.State.Waiting != nil && containerStatus.State.Waiting.Reason == ContainerCreating:
+		// if pod is not in running state after 10 mins of its creation, assume the pod is in failed state
+		if time.Now().Sub(pod.CreationTimestamp.Time) > 10*time.Minute {
+			pvProgress.Status.PodPhase = kapi.PodFailed
+			pvProgress.Status.LogMessage = fmt.Sprintf("Pod %s/%s is stuck in ContainerCreating for more than 10 mins", pod.Name, pod.Namespace)
+		}
 	case pod.Status.Phase == kapi.PodFailed:
 		// Its possible for the succeeded pod to not have containerStatuses at all
 		pvProgress.Status.PodPhase = kapi.PodFailed
