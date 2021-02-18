@@ -1166,7 +1166,7 @@ func getMD5Hash(s string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, error) {
+func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, bool, error) {
 	t.Owner.Status.RunningPods = []*migapi.PodProgress{}
 	t.Owner.Status.FailedPods = []*migapi.PodProgress{}
 	t.Owner.Status.SuccessfulPods = []*migapi.PodProgress{}
@@ -1181,7 +1181,7 @@ func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, error) {
 			}, &dvmp)
 			if err != nil {
 				// todo, need to start thinking about collecting this error and reporting other CR's progress
-				return false, false, err
+				return false, false, false, err
 			}
 			objRef := &corev1.ObjectReference{
 				Namespace: ns,
@@ -1206,14 +1206,21 @@ func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, error) {
 					LastObservedProgressPercent: dvmp.Status.LastObservedProgressPercent,
 					LastObservedTransferRate:    dvmp.Status.LastObservedTransferRate,
 				})
+			case dvmp.Status.PodPhase == corev1.PodPending:
+				t.Owner.Status.PendingPods = append(t.Owner.Status.PendingPods, &migapi.PodProgress{
+					ObjectReference:             objRef,
+					LastObservedProgressPercent: dvmp.Status.LastObservedProgressPercent,
+					LastObservedTransferRate:    dvmp.Status.LastObservedTransferRate,
+				})
 			}
 		}
 	}
 
 	isCompleted := len(t.Owner.Status.SuccessfulPods)+len(t.Owner.Status.FailedPods) == len(t.Owner.Spec.PersistentVolumeClaims)
 	hasAnyFailed := len(t.Owner.Status.FailedPods) > 0
+	isAnyPending := len(t.Owner.Status.PendingPods) > 0
 
-	return isCompleted, hasAnyFailed, nil
+	return isCompleted, hasAnyFailed, isAnyPending, nil
 }
 
 func hasAllRsyncClientPodsTimedOut(pvcMap map[string][]pvcMapElement, client k8sclient.Client, dvmName string) (bool, error) {

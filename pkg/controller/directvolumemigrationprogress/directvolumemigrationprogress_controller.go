@@ -58,6 +58,7 @@ const (
 	ClusterNotReady   = "ClusterNotReady"
 	InvalidPodRef     = "InvalidPodRef"
 	InvalidPod        = "InvalidPod"
+	PodNotReady       = "PodNotReady"
 )
 
 const (
@@ -281,11 +282,17 @@ func (r *ReconcileDirectVolumeMigrationProgress) reportContainerStatus(pvProgres
 		exitCode := containerStatus.LastTerminationState.Terminated.ExitCode
 		pvProgress.Status.ExitCode = &exitCode
 		pvProgress.Status.ContainerElapsedTime = &metav1.Duration{Duration: containerStatus.LastTerminationState.Terminated.FinishedAt.Sub(containerStatus.LastTerminationState.Terminated.StartedAt.Time).Round(time.Second)}
-	case !containerStatus.Ready && containerStatus.State.Waiting != nil && containerStatus.State.Waiting.Reason == ContainerCreating:
-		// if pod is not in running state after 10 mins of its creation, assume the pod is in failed state
+	case !containerStatus.Ready && pod.Status.Phase == kapi.PodPending && containerStatus.State.Waiting != nil && containerStatus.State.Waiting.Reason == ContainerCreating:
+		// if pod is not in running state after 10 mins of its creation, raise a
 		if time.Now().Sub(pod.CreationTimestamp.Time) > 10*time.Minute {
-			pvProgress.Status.PodPhase = kapi.PodFailed
-			pvProgress.Status.LogMessage = fmt.Sprintf("Pod %s/%s is stuck in ContainerCreating for more than 10 mins", pod.Name, pod.Namespace)
+			pvProgress.Status.PodPhase = kapi.PodPending
+			pvProgress.Status.SetCondition(migapi.Condition{
+				Type:     PodNotReady,
+				Status:   migapi.True,
+				Reason:   "PodStuckInContainerCreating",
+				Category: migapi.Warn,
+				Message:  fmt.Sprintf("Pod %s/%s is stuck in ContainerCreating for more than 10 mins", pod.Name, pod.Namespace),
+			})
 		}
 	case pod.Status.Phase == kapi.PodFailed:
 		// Its possible for the succeeded pod to not have containerStatuses at all

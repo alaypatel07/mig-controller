@@ -420,11 +420,11 @@ func (t *Task) Run() error {
 			return liberr.Wrap(err)
 		}
 	case WaitForRsyncClientPodsCompleted:
-		completed, failed, err := t.haveRsyncClientPodsCompletedOrFailed()
+		completed, failed, pending, err := t.haveRsyncClientPodsCompletedOrFailed()
 		if err != nil {
 			return liberr.Wrap(err)
 		}
-		if completed {
+		if completed && !pending {
 			isEgressNetworkSetup, err := hasAllRsyncClientPodsTimedOut(t.getPVCNamespaceMap(), t.Client, t.Owner.Name)
 			if err != nil {
 				return err
@@ -452,6 +452,15 @@ func (t *Task) Run() error {
 				return liberr.Wrap(err)
 			}
 		} else {
+			if pending {
+				t.Owner.Status.SetCondition(migapi.Condition{
+					Type:     RsyncClientPodsPending,
+					Status:   migapi.True,
+					Reason:   "PodStuckInContainerCreating",
+					Category: migapi.Warn,
+					Message:  fmt.Sprintf("Pods are stuck in ContainerCreating for more than 10 mins, check dvmp for further details"),
+				})
+			}
 			t.Requeue = PollReQ
 		}
 	case DeleteRsyncResources:
