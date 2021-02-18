@@ -46,6 +46,8 @@ import (
 
 var log = logging.WithName("pvmigrationprogress")
 
+var TimeLimit = 10*time.Minute
+
 const (
 	NotFound    = "NotFound"
 	NotSet      = "NotSet"
@@ -284,7 +286,7 @@ func (r *ReconcileDirectVolumeMigrationProgress) reportContainerStatus(pvProgres
 		pvProgress.Status.ContainerElapsedTime = &metav1.Duration{Duration: containerStatus.LastTerminationState.Terminated.FinishedAt.Sub(containerStatus.LastTerminationState.Terminated.StartedAt.Time).Round(time.Second)}
 	case !containerStatus.Ready && pod.Status.Phase == kapi.PodPending && containerStatus.State.Waiting != nil && containerStatus.State.Waiting.Reason == ContainerCreating:
 		// if pod is not in running state after 10 mins of its creation, raise a
-		if time.Now().Sub(pod.CreationTimestamp.Time) > 10*time.Minute {
+		if time.Now().Sub(pod.CreationTimestamp.Time) > TimeLimit {
 			pvProgress.Status.PodPhase = kapi.PodPending
 			pvProgress.Status.SetCondition(migapi.Condition{
 				Type:     PodNotReady,
