@@ -1170,7 +1170,7 @@ func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, bool, error) 
 	t.Owner.Status.RunningPods = []*migapi.PodProgress{}
 	t.Owner.Status.FailedPods = []*migapi.PodProgress{}
 	t.Owner.Status.SuccessfulPods = []*migapi.PodProgress{}
-
+	pendingMessage := ""
 	pvcMap := t.getPVCNamespaceMap()
 	for ns, vols := range pvcMap {
 		for _, vol := range vols {
@@ -1212,6 +1212,7 @@ func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, bool, error) 
 					LastObservedProgressPercent: dvmp.Status.LastObservedProgressPercent,
 					LastObservedTransferRate:    dvmp.Status.LastObservedTransferRate,
 				})
+				pendingMessage += dvmp.Status.LogMessage + " "
 			}
 		}
 	}
@@ -1220,6 +1221,15 @@ func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, bool, error) 
 	hasAnyFailed := len(t.Owner.Status.FailedPods) > 0
 	isAnyPending := len(t.Owner.Status.PendingPods) > 0
 
+	if isAnyPending {
+		t.Owner.Status.SetCondition(migapi.Condition{
+			Type:     RsyncClientPodsPending,
+			Status:   migapi.True,
+			Reason:   "PodStuckInContainerCreating",
+			Category: migapi.Warn,
+			Message:  pendingMessage,
+		})
+	}
 	return isCompleted, hasAnyFailed, isAnyPending, nil
 }
 

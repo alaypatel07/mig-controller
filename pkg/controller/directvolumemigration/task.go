@@ -452,15 +452,15 @@ func (t *Task) Run() error {
 				return liberr.Wrap(err)
 			}
 		} else {
-			if pending {
-				t.Owner.Status.SetCondition(migapi.Condition{
-					Type:     RsyncClientPodsPending,
-					Status:   migapi.True,
-					Reason:   "PodStuckInContainerCreating",
-					Category: migapi.Warn,
-					Message:  fmt.Sprintf("Pods are stuck in ContainerCreating for more than 10 mins, check dvmp for further details"),
-				})
-			}
+			//if pending {
+			//	t.Owner.Status.SetCondition(migapi.Condition{
+			//		Type:     RsyncClientPodsPending,
+			//		Status:   migapi.True,
+			//		Reason:   "PodStuckInContainerCreating",
+			//		Category: migapi.Warn,
+			//		Message:  fmt.Sprintf("Pods are stuck in ContainerCreating for more than 10 mins, check dvmp for further details"),
+			//	})
+			//}
 			t.Requeue = PollReQ
 		}
 	case DeleteRsyncResources:
