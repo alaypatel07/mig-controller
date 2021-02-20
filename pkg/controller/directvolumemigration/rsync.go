@@ -1166,7 +1166,7 @@ func getMD5Hash(s string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (t *Task) haveRsyncClientPodsCompletedOrFailed() (bool, bool, bool, error) {
+func (t *Task) haveRsyncClientPodsCompletedFailedOrPending() (bool, bool, bool, error) {
 	t.Owner.Status.RunningPods = []*migapi.PodProgress{}
 	t.Owner.Status.FailedPods = []*migapi.PodProgress{}
 	t.Owner.Status.SuccessfulPods = []*migapi.PodProgress{}
