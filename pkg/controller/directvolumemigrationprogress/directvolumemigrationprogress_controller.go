@@ -288,7 +288,7 @@ func (r *ReconcileDirectVolumeMigrationProgress) reportContainerStatus(pvProgres
 		// if pod is not in running state after 10 mins of its creation, raise a
 		if time.Now().Sub(pod.CreationTimestamp.Time) > TimeLimit {
 			pvProgress.Status.PodPhase = kapi.PodPending
-			pvProgress.Status.LogMessage = fmt.Sprintf("Pod %s/%s is stuck in ContainerCreating for more than 10 mins", pod.Name, pod.Namespace)
+			pvProgress.Status.LogMessage = fmt.Sprintf("Pod %s/%s is stuck in ContainerCreating for more than 10 mins", pod.Namespace, pod.Name)
 			pvProgress.Status.ContainerElapsedTime = &metav1.Duration{Duration: time.Now().Sub(pod.CreationTimestamp.Time).Round(time.Second)}
 		}
 	case pod.Status.Phase == kapi.PodFailed:

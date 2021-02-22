@@ -1212,7 +1212,7 @@ func (t *Task) haveRsyncClientPodsCompletedFailedOrPending() (bool, bool, bool, 
 					LastObservedProgressPercent: dvmp.Status.LastObservedProgressPercent,
 					LastObservedTransferRate:    dvmp.Status.LastObservedTransferRate,
 				})
-				pendingMessage += dvmp.Status.LogMessage + " "
+				pendingMessage += dvmp.Status.LogMessage + "\n"
 			}
 		}
 	}
