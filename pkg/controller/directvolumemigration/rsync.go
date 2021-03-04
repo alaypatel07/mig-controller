@@ -1245,6 +1245,7 @@ func hasAllRsyncClientPodsTimedOut(pvcMap map[string][]pvcMapElement, client k8s
 				return false, err
 			}
 			if dvmp.Status.PodPhase != corev1.PodFailed ||
+				dvmp.Status.ContainerElapsedTime == nil ||
 				(dvmp.Status.ContainerElapsedTime != nil &&
 					dvmp.Status.ContainerElapsedTime.Duration.Round(time.Second).Seconds() != float64(DefaultStunnelTimeout)) {
 				return false, nil
